@@ -1,0 +1,117 @@
+[project]
+name = "ecommerce-backend"
+version = "0.1.0"
+description = "E-commerce platform backend: FastAPI + Strawberry GraphQL + PostgreSQL"
+readme = "README.md"
+authors = [
+    { name = "SOKUNBI TAIWO", email = "sokunbitaiwo82@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.20.0",
+    "argon2-cffi>=25.1.0",
+    "arq>=0.28.0",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.141.1",
+    "pydantic-settings>=2.15.0",
+    "pyjwt>=2.14.0",
+    "redis[hiredis]>=5.3.1",
+    "sqlalchemy[asyncio]>=2.0.54",
+    "strawberry-graphql[fastapi]>=0.327.7",
+    "structlog>=26.1.0",
+    "uvicorn[standard]>=0.53.0",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.5,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "app"
+module-root = ""
+
+[dependency-groups]
+dev = [
+    "detect-secrets>=1.5.0",
+    "factory-boy>=3.3.3",
+    "faker>=40.39.0",
+    "httpx>=0.28.1",
+    "mypy>=2.3.1",
+    "pre-commit>=4.6.2",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.8",
+]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "S",      # flake8-bandit (security)
+    "ASYNC",  # flake8-async
+    "C4",     # comprehensions
+    "DTZ",    # naive-datetime bugs
+    "T20",    # no print()
+    "SIM",    # simplify
+    "RUF",    # ruff-specific
+]
+ignore = [
+    "B008",  # function call in default arg — required by FastAPI's Depends()
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",  # assert is the point of a test
+    "S105",  # hardcoded "passwords" in fixtures are fake
+    "S106",
+]
+"migrations/**/*.py" = ["E501", "N999"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+exclude = ["^migrations/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+# ---------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = [
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+    "--cov=app",
+    "--cov-report=term-missing",
+    "--cov-fail-under=80",
+]
+markers = [
+    "unit: pure logic, no I/O",
+    "integration: touches Postgres or Redis",
+    "e2e: full GraphQL request through the ASGI app",
+]
+
+[tool.coverage.run]
+branch = true
+omit = ["app/__main__.py", "migrations/*"]
