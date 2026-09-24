@@ -1,0 +1,199 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+# Least privilege: nothing here needs write access to the repo.
+permissions:
+  contents: read
+
+# A newer push to the same ref makes the in-flight run obsolete.
+# Never cancel on main — those runs gate the branch's recorded status.
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Keep every job on the version pinned by backend/.python-version.
+  # The runner image ships several Pythons; nothing should drift onto 3.14.
+  UV_PYTHON: "3.12"
+  # Fail loudly if uv.lock is stale rather than silently resolving new deps.
+  UV_FROZEN: "1"
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.9.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+
+      # Separate steps so the log says which one failed, not just "ruff".
+      - name: ruff check
+        run: uv run ruff check --output-format=github .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.9.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+
+      - name: mypy
+        run: uv run mypy app
+
+  test:
+    name: Tests (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Phase 1 integration tests land within the next few steps. Standing the
+    # services up now means the wiring is already proven green rather than
+    # debugged for the first time under a failing feature branch.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ecommerce_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ecommerce_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Throwaway credentials for an ephemeral container on a private network.
+      # Real secrets never live in a workflow file — see .env.example / repo secrets.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ecommerce_test
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.9.5"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-groups
+
+      # `services` health checks gate the container, not the TCP path from the
+      # job. This asserts the port is genuinely reachable before tests run, so
+      # a connection failure reads as infrastructure rather than a test bug.
+      #
+      # Checked with tools the runner actually has: pg_isready ships with the
+      # ubuntu image, but redis-cli does not — so Redis is probed over bare TCP
+      # via bash's /dev/tcp rather than installing a client just to say "ping".
+      - name: Wait for services
+        run: |
+          timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres; do sleep 1; done'
+          timeout 60 bash -c 'until (exec 3<>/dev/tcp/localhost/6379) 2>/dev/null; do sleep 1; done'
+          echo "postgres and redis are reachable"
+
+      # The 80% gate lives in pyproject addopts; a bare pytest enforces it.
+      - name: pytest
+        run: uv run pytest --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        # Runs even when pytest fails — coverage from a failing run is how you
+        # find what went untested. But if an earlier step died before pytest,
+        # there is legitimately no file: warn rather than error, so the log
+        # keeps pointing at the real failure instead of raising a second one.
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-${{ github.run_id }}
+          path: backend/coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Repo-wide concern: not scoped to backend/ like the other jobs.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history so a secret added in an earlier commit on the branch
+          # is caught, not just one in the tip commit.
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Single required status check for branch protection. Without the explicit
+  # result test, this job would pass when a dependency is skipped or cancelled.
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, secrets]
+    if: always()
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - name: Verify all jobs succeeded
+        run: |
+          echo "lint=${{ needs.lint.result }}"
+          echo "typecheck=${{ needs.typecheck.result }}"
+          echo "test=${{ needs.test.result }}"
+          echo "secrets=${{ needs.secrets.result }}"
+          [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped') }}" = "false" ]
