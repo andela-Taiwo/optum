@@ -132,23 +132,31 @@ jobs:
       # `services` health checks gate the container, not the TCP path from the
       # job. This asserts the port is genuinely reachable before tests run, so
       # a connection failure reads as infrastructure rather than a test bug.
+      #
+      # Checked with tools the runner actually has: pg_isready ships with the
+      # ubuntu image, but redis-cli does not — so Redis is probed over bare TCP
+      # via bash's /dev/tcp rather than installing a client just to say "ping".
       - name: Wait for services
         run: |
           timeout 60 bash -c 'until pg_isready -h localhost -p 5432 -U postgres; do sleep 1; done'
-          timeout 60 bash -c 'until redis-cli -h localhost -p 6379 ping; do sleep 1; done'
+          timeout 60 bash -c 'until (exec 3<>/dev/tcp/localhost/6379) 2>/dev/null; do sleep 1; done'
+          echo "postgres and redis are reachable"
 
       # The 80% gate lives in pyproject addopts; a bare pytest enforces it.
       - name: pytest
         run: uv run pytest --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage
-        # Coverage from a failed run is how you find out what went untested.
+        # Runs even when pytest fails — coverage from a failing run is how you
+        # find what went untested. But if an earlier step died before pytest,
+        # there is legitimately no file: warn rather than error, so the log
+        # keeps pointing at the real failure instead of raising a second one.
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-${{ github.run_id }}
           path: backend/coverage.xml
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
 
   secrets:
