@@ -1,0 +1,27 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+coverage.xml
+htmlcov
+
+# Secrets never enter the build context. .env.example is harmless but there is
+# no reason to ship it either.
+.env
+.env.*
+
+# Docs are excluded EXCEPT README.md, which pyproject declares as `readme`
+# and the build backend reads — without the negation the build fails.
+*.md
+!README.md
+
+Dockerfile
+.dockerignore
+docker-compose.yml
+tests

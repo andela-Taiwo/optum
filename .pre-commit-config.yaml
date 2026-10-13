@@ -1,0 +1,59 @@
+# Local mirror of the CI gates. Keep in sync with .github/workflows/backend-ci.yml —
+# a hook that CI doesn't enforce is theatre, and a CI gate with no hook means
+# every developer finds out about it from a red build.
+#
+#   uv run pre-commit install
+#   uv run pre-commit run --all-files
+
+default_language_version:
+  python: python3.12
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      # .env must never be committed; .env.example is the documented exception.
+      - id: check-illegal-windows-names
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
+    hooks:
+      # `ruff-check`, not `ruff` — the latter is a legacy alias for the same
+      # hook, so listing both lints every file twice.
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+        # Restrict to Python: the default types_or includes markdown, which
+        # would silently reformat plan.md and every other doc.
+        types_or: [python, pyi]
+
+  # CI runs mypy strict; without a hook here, type errors are only ever found
+  # by a failing build. Deps are listed explicitly because pre-commit builds
+  # an isolated env that cannot see the project's venv.
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.18.2
+    hooks:
+      - id: mypy
+        files: ^backend/app/
+        args: [--config-file=backend/pyproject.toml]
+        additional_dependencies:
+          - pydantic>=2
+          - pydantic-settings>=2
+          - fastapi
+          - sqlalchemy[asyncio]>=2
+          - strawberry-graphql
+          - structlog
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.2
+    hooks:
+      - id: gitleaks
