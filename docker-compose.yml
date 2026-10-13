@@ -1,0 +1,70 @@
+name: optum
+
+
+
+services:
+  backend:
+    build:
+      context: ./backend
+      target: runtime
+    ports:
+      - "${BACKEND_HOST_PORT:-8000}:8000"
+    environment:
+      ENVIRONMENT: local
+      DEBUG: "true"
+      # Hostnames are compose SERVICE NAMES, not localhost: inside a container
+      # localhost is that container itself, so `localhost:5432` would try to
+      # reach a Postgres running inside the backend image.
+      # Port is the CONTAINER port (5432), never the remapped host port.
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/ecommerce
+      REDIS_URL: redis://redis:6379/0
+      # Local-only throwaway value. Real environments inject this from a
+      # secret store; Settings refuses to boot without it.
+      SECRET_KEY: ${SECRET_KEY:-local-dev-only-not-a-real-secret-0123456789}
+    depends_on:
+      # Both, and both gated on health: the app's fail-fast Settings means a
+      # backend that starts before Postgres accepts connections just dies.
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    # The image reads POSTGRES_*; a DATABASE_URL here would be ignored and the
+    # database named in it would never be created.
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ecommerce
+    ports:
+      - "${POSTGRES_HOST_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Must name the user and database this container actually creates,
+      # otherwise the check never passes and dependents never start.
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ecommerce"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_HOST_PORT:-56379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:
