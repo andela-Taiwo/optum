@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     refresh_token_ttl_days: int = 7
     jwt_algorithm: str = "HS256"
 
+    # ---- database pool ----
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+
     # ---- cors ----
     cors_origins: list[str] = Field(default_factory=list)
 
@@ -61,6 +65,22 @@ class Settings(BaseSettings):
         database is a very bad afternoon.
         """
         return self.database_url.replace("+asyncpg", "+psycopg")
+
+    @model_validator(mode="after")
+    def _require_async_driver(self) -> Self:
+        """Reject a DSN without the async driver rather than rewriting it.
+
+        A bare `postgresql://` works for the app only if something patches the
+        driver in at call time — and then sync_database_url's `+asyncpg` ->
+        `+psycopg` swap silently no-ops, handing Alembic an async URL. Failing
+        here points at the actual mistake: the environment.
+        """
+        if not self.database_url.startswith("postgresql+asyncpg://"):
+            raise ValueError(
+                "database_url must start with 'postgresql+asyncpg://' "
+                f"(got {self.database_url.split('://')[0]}://...)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _forbid_debug_in_production(self) -> Self:
