@@ -113,8 +113,10 @@ jobs:
     env:
       # Throwaway credentials for an ephemeral container on a private network.
       # Real secrets never live in a workflow file — see .env.example / repo secrets.
+      ENVIRONMENT: test
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/ecommerce_test
       REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-only-not-a-real-secret-0123456789abcdef
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
