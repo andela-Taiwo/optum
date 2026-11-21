@@ -3,6 +3,7 @@ name = "ecommerce-backend"
 version = "0.1.0"
 description = "E-commerce platform backend: FastAPI + Strawberry GraphQL + PostgreSQL"
 readme = "README.md"
+license = { text = "MIT" }
 authors = [
     { name = "SOKUNBI TAIWO", email = "sokunbitaiwo82@gmail.com" }
 ]
